@@ -1,0 +1,24 @@
+# 環境變數 (Discord Bot Token)
+.env
+
+# 執行時產生的資料 (通知頻道等)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Log
+*.log
+logs/
+
+# 編輯器 / 系統
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code
+CLAUDE.md
+.claude/
