@@ -10,9 +10,14 @@
 
 - 每 1 分鐘先 ping 一次 `google.com`，確認是自己的網路沒問題；連 Google 都連不上就略過這一輪
 - 接著檢查 `web_list.json` 中所有網站，**連續 2 次**沒回應才算連接失敗
-- 狀態切換時，發 embed 到所有已註冊的頻道：
+- 網站炸**超過 5 分鐘**才會發 embed 到所有已註冊的頻道，短暫抽風不會洗版：
   - :boom: **網站炸了**（附上原因，例如逾時、HTTP 503）
-  - :sparkles: **網站復活了**，這次炸了 `<時間>`
+  - :sparkles: **網站復活了**，這次炸了 `<時間>`（只有發過「炸了」的網站才會發）
+- 每次當機（包含不到 5 分鐘的）都會記錄在 `data/outages.json`
+
+### 更新公告
+
+- 機器人啟動時若發現版本和上次不同，會在通知頻道公告更新內容
 
 ### 主動偵測
 
@@ -91,16 +96,47 @@ DISCORD_TOKEN=你的機器人Token
 
 已註冊的通知頻道 ID，由 `/notify_channel_register` 自動管理，不需要手動編輯。
 
+### `data/outages.json`
+
+當機紀錄，每 1 分鐘判斷一次，自動產生：
+
+```json
+{
+    "name": "ee-class",
+    "url": "https://ncueeclass.ncu.edu.tw",
+    "start": "2026-11-26T12:02:03",
+    "end": "2026-11-26T12:10:03",
+    "duration_seconds": 480,
+    "reason": "逾時",
+    "notified": true
+}
+```
+
+`end` 為 `null` 代表還在炸；`notified` 代表是否有發出通知。
+
+### `data/version.json`
+
+上次啟動時的版本，用來判斷是否要公告更新。
+
+## 發布新版本
+
+1. 修改 `core/version.py` 的 `VERSION`
+2. 在 `CHANGELOG` 最上面新增這次的更新內容
+3. 重新啟動機器人，就會自動公告
+
 ## 專案結構
 
 ```
 .
-├── main.py                 # 機器人主程式，自動載入 cogs/
+├── main.py                 # 機器人主程式，自動載入 cogs/、廣播到通知頻道
 ├── cogs/
-│   └── monitor.py          # 被動偵測、/is_ncu_alive、/notify_channel_register
+│   ├── monitor.py          # 被動偵測、/is_ncu_alive、/notify_channel_register
+│   └── updater.py          # 版本更新公告
 ├── core/
 │   ├── site_checker.py     # 發送請求、計算延遲（獨立於 Discord）
-│   └── channel_store.py    # 通知頻道的讀寫
+│   ├── channel_store.py    # 通知頻道的讀寫
+│   ├── outage_log.py       # 當機紀錄的讀寫
+│   └── version.py          # 版本號與更新內容
 ├── web_list.json           # 監測的網站清單
 ├── .env.example
 └── requirements.txt
@@ -108,5 +144,5 @@ DISCORD_TOKEN=你的機器人Token
 
 ## 注意事項
 
-- 網站狀態只存在記憶體中，重新啟動後會重新判斷；如果啟動時網站已經炸了，會直接發一次「炸了」通知
+- 重新啟動時會從 `data/outages.json` 還原還沒結束的當機，不會重複通知
 - 停機時間從第一次偵測到失敗開始計算，誤差約 1 分鐘

@@ -25,3 +25,8 @@ CLAUDE.md
 
 # 企劃書 (不公開)
 proposal.md
+
+# Docker (不公開)
+Dockerfile
+docker-compose.yml
+.dockerignore

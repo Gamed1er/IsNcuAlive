@@ -10,5 +10,9 @@
     {
         "name" : "ee-class",
         "url"  : "https://ncueeclass.ncu.edu.tw"
+    },
+    {
+        "name" : "中央資工系網",
+        "url"  : "https://www.csie.ncu.edu.tw/"
     }
 ]

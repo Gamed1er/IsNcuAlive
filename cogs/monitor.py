@@ -1,14 +1,16 @@
 import json
 import asyncio
 import discord
-from datetime import datetime
+from datetime import datetime, timedelta
 from discord.ext import commands, tasks
 from discord import app_commands
 from core.site_checker import SiteState, ping, ping_once, new_session, format_duration
-from core.channel_store import load_channels, toggle_channel
+from core.channel_store import toggle_channel
+from core.outage_log import open_records, start_outage, mark_notified, end_outage
 
 WEB_LIST_PATH = "web_list.json"
 GOOGLE_URL = "https://www.google.com"
+NOTIFY_THRESHOLD = timedelta(minutes=5)  # 炸超過這麼久才發通知
 
 
 class Monitor(commands.Cog):
@@ -20,6 +22,16 @@ class Monitor(commands.Cog):
     async def cog_load(self):
         with open(WEB_LIST_PATH, "r", encoding="utf-8") as f:
             self.sites = [SiteState(s["name"], s["url"]) for s in json.load(f)]
+
+        # 從當機紀錄還原重啟前還沒結束的當機
+        unfinished = open_records()
+        for site in self.sites:
+            record = unfinished.get(site.url)
+            if record:
+                site.is_up = False
+                site.down_since = datetime.fromisoformat(record["start"])
+                site.notified = record["notified"]
+
         self.session = new_session()
         self.passive_check.start()
 
@@ -27,17 +39,6 @@ class Monitor(commands.Cog):
         self.passive_check.cancel()
         if self.session:
             await self.session.close()
-
-    async def broadcast(self, embed: discord.Embed):
-        """發送到所有已註冊的通知頻道"""
-        for channel_id in load_channels():
-            channel = self.bot.get_channel(channel_id)
-            try:
-                if channel is None:
-                    channel = await self.bot.fetch_channel(channel_id)
-                await channel.send(embed=embed)
-            except discord.DiscordException as e:
-                print(f"通知頻道 {channel_id} 發送失敗: {e}")
 
     # ---------- 被動偵測 ----------
     @tasks.loop(minutes=1)
@@ -51,32 +52,45 @@ class Monitor(commands.Cog):
         now = datetime.now()
 
         for site, result in zip(self.sites, results):
-            was_up = site.is_up
-            site.is_up = result.ok
+            if not result.ok:
+                if site.is_up is not False:
+                    # 剛炸，先記錄，等超過門檻再通知
+                    site.is_up = False
+                    site.down_since = now
+                    site.notified = False
+                    start_outage(site.name, site.url, now, result.error)
 
-            if not result.ok and was_up is not False:
-                # 剛炸 (或機器人剛啟動就是炸的)
-                site.down_since = now
-                await self.notify_down(site, result.error)
-            elif result.ok and was_up is False:
-                downtime = (now - site.down_since).total_seconds() if site.down_since else 0
+                if not site.notified and now - site.down_since >= NOTIFY_THRESHOLD:
+                    site.notified = True
+                    mark_notified(site.url)
+                    await self.notify_down(site, result.error, (now - site.down_since).total_seconds())
+
+            elif site.is_up is False:
+                # 復活了，只有發過「炸了」通知的才發「復活了」
+                end_outage(site.url, now)
+                if site.notified:
+                    await self.notify_up(site, (now - site.down_since).total_seconds())
+                site.is_up = True
                 site.down_since = None
-                await self.notify_up(site, downtime)
+                site.notified = False
+
+            else:
+                site.is_up = True
 
     @passive_check.before_loop
     async def before_passive_check(self):
         await self.bot.wait_until_ready()
 
-    async def notify_down(self, site: SiteState, reason):
+    async def notify_down(self, site: SiteState, reason, downtime: float):
         embed = discord.Embed(
             title=f":boom: {site.name} 炸了",
-            description=f"又來了，[{site.name}]({site.url}) 連不上 :upside_down:",
+            description=f"又來了，[{site.name}]({site.url}) 已經連不上 **{format_duration(downtime)}** :upside_down:",
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow(),
         )
         if reason:
             embed.add_field(name="原因", value=reason)
-        await self.broadcast(embed)
+        await self.bot.broadcast(embed)
 
     async def notify_up(self, site: SiteState, downtime: float):
         embed = discord.Embed(
@@ -85,7 +99,7 @@ class Monitor(commands.Cog):
             color=discord.Color.green(),
             timestamp=discord.utils.utcnow(),
         )
-        await self.broadcast(embed)
+        await self.bot.broadcast(embed)
 
     # ---------- 主動偵測 ----------
     @app_commands.command(name="is_ncu_alive", description="立刻檢查所有中央大學網站是否還活著")

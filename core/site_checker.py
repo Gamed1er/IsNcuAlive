@@ -1,7 +1,7 @@
 import time
 import asyncio
 import aiohttp
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -21,6 +21,7 @@ class SiteState:
     url: str
     is_up: Optional[bool] = None  # None = 還沒檢查過
     down_since: Optional[datetime] = None
+    notified: bool = False  # 這次當機是否已發出「炸了」通知
 
 
 async def ping_once(session: aiohttp.ClientSession, url: str) -> CheckResult:
